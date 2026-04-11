@@ -1,0 +1,8 @@
+build/
+downloads/
+artifacts/
+.playwright-cli/
+.vs/
+*.user
+*.suo
+*.vcxproj.user
