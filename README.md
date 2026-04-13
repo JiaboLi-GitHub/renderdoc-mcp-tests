@@ -1,5 +1,7 @@
 # renderdoc-mcp Tests
 
+[中文版本](README-CN.md)
+
 This repository contains local test assets, sample programs, and test notes for validating `renderdoc-mcp` on Windows.
 
 The current coverage is focused on OpenGL. The repository is intentionally named more broadly so additional backends such as Vulkan can be added later.
