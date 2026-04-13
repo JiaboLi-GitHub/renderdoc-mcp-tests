@@ -1,6 +1,8 @@
-# renderdoc-mcp OpenGL Tests
+# renderdoc-mcp Tests
 
-This repository contains local test assets, sample programs, and test notes for validating `renderdoc-mcp` against OpenGL captures on Windows.
+This repository contains local test assets, sample programs, and test notes for validating `renderdoc-mcp` on Windows.
+
+The current coverage is focused on OpenGL. The repository is intentionally named more broadly so additional backends such as Vulkan can be added later.
 
 ## Included
 
@@ -12,6 +14,17 @@ This repository contains local test assets, sample programs, and test notes for 
   - build configuration for the OpenGL samples
 - `renderdoc-mcp-test-report.md`
   - test report capturing scenario coverage, findings, and retest notes
+
+## Repository Layout
+
+- `src/`
+  - test sample sources used to generate reproducible captures
+- `renderdoc-mcp-test-report.md`
+  - consolidated execution notes and regression results
+- `build/`
+  - local generated build output, ignored from git
+- `artifacts/`
+  - local captures and exported images, ignored from git
 
 ## Build
 

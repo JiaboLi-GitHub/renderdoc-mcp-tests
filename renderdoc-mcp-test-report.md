@@ -171,20 +171,6 @@ Retest artifacts:
 - MCP analysis log: `artifacts\repro\mcp_analysis_result.json`
 - Retest render target export: `artifacts\repro\renderdoc-mcp-export\rt_13_0.png`
 
-### Residual Issue Observed
-
-During `capture_frame`, the target application's stdout was forwarded into the MCP server stdout stream:
-
-- `GL_VERSION=4.6.0 Core Profile Context ...`
-- `GL_RENDERER=AMD Radeon(TM) Graphics`
-- `Renderer path=modern-shader`
-- `Completed 240 frames.`
-
-Impact:
-
-- A strict line-oriented MCP client can misread these lines as protocol output unless it ignores non-JSON noise.
-- The RenderDoc analysis itself still completed successfully once valid JSON-RPC responses were filtered.
-
 ## Advanced Scenario Coverage
 
 Additional sample: `renderdoc_mcp_opengl_advanced`
@@ -337,3 +323,59 @@ Impact:
   - `artifacts\advanced\advanced_analysis_log.json`
 - Deep checks:
   - `artifacts\advanced\advanced_deep_checks.json`
+
+## Rebuild And Reinstall Validation
+
+Retest date: 2026-04-13
+
+Validation flow:
+
+1. Rebuild `D:\renderdoc\renderdoc-mcp` with `cmake --build build --config Release`
+2. Repackage the freshly built `Release` binaries and reinstall with `install-codex.ps1`
+3. Re-run a direct stdio JSON-RPC regression against the newly installed:
+   - `C:\Users\Administrator\.codex\vendor_imports\renderdoc-mcp\bin\renderdoc-mcp.exe`
+4. Capture a fresh frame from `renderdoc_mcp_opengl_advanced.exe`
+5. Verify the previously failing OpenGL inspection points
+
+### Reinstall Result
+
+- Installed binary timestamp:
+  - `renderdoc-mcp.exe` -> `2026-04-13 10:22:31`
+- Installed location:
+  - `C:\Users\Administrator\.codex\vendor_imports\renderdoc-mcp\bin`
+- New capture generated successfully:
+  - `artifacts\advanced\retest-after-install\advanced_capture_after_install.rdc`
+  - `artifacts\advanced\retest-after-install\advanced_capture_after_install_frame183.rdc`
+
+### Regression Result
+
+All three previously observed OpenGL issues were no longer reproducible after rebuilding from source and reinstalling:
+
+- `list_passes` returned `2` synthetic passes
+- `get_cbuffer_contents` returned real UBO values
+  - `uMvp` contained non-zero matrix data
+  - `uTint` = `[1.0, 0.92, 0.86, 1.0]`
+- `get_bindings` on the composite draw returned correct texture slots
+  - `uSceneTexture` -> `bindPoint = 0`
+  - `uLutTexture` -> `bindPoint = 1`
+
+### Rebuild Retest Artifact
+
+- Direct MCP regression log:
+  - `artifacts\advanced\retest-after-install\retest_after_install_20260413.json`
+
+## Project Test Suite Check
+
+After the rebuild, `ctest -C Release --output-on-failure` was executed in `D:\renderdoc\renderdoc-mcp\build`.
+
+- Result: `180 / 181` tests passed
+- One integration test failed:
+  - `WorkflowTest.FullDebugWorkflow`
+
+### Failing Test Note
+
+The failing assertion expects `list_events` to return a top-level array. The current server returns an object with this shape instead:
+
+- `{"count": 7, "events": [...]}` 
+
+This means the remaining failure is in the integration test expectation, not in the three OpenGL fixes verified above.
