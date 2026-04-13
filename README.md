@@ -15,12 +15,14 @@ The current coverage is focused on OpenGL. The repository is intentionally named
 - `CMakeLists.txt`
   - build configuration for the OpenGL samples
 - `renderdoc-mcp-test-report.md`
-  - test report capturing scenario coverage, findings, and retest notes
+  - test report covering scenario coverage, findings, root-cause notes, and reinstall retest results
 
 ## Repository Layout
 
 - `src/`
   - test sample sources used to generate reproducible captures
+- `scripts/`
+  - reusable stdio-driven regression scripts for renderdoc-mcp tool checks
 - `renderdoc-mcp-test-report.md`
   - consolidated execution notes and regression results
 - `build/`

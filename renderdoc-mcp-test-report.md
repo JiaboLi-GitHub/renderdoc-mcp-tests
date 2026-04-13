@@ -379,3 +379,183 @@ The failing assertion expects `list_events` to return a top-level array. The cur
 - `{"count": 7, "events": [...]}` 
 
 This means the remaining failure is in the integration test expectation, not in the three OpenGL fixes verified above.
+
+## Extended Tool Coverage
+
+Retest date: 2026-04-13
+
+This round focused on the broader MCP tool surface beyond capture, pass inspection, and basic resource queries.
+
+### Added Test Harness
+
+- Reusable script:
+  - `scripts\run_extended_mcp_checks.py`
+- Purpose:
+  - drive `renderdoc-mcp.exe` over stdio
+  - capture two fresh advanced-sample frames
+  - run shader, resource, and diff tool checks
+  - write a structured JSON report under `artifacts\extended`
+
+### Tools Verified In Extended Coverage
+
+The following tools worked as expected on the advanced OpenGL sample:
+
+- `list_events`
+- `get_draw_info`
+- `get_shader`
+  - VS reflection
+  - VS disassembly
+  - PS reflection
+- `list_shaders`
+- `search_shaders`
+- `get_texture_stats`
+- `get_resource_usage`
+- `export_texture`
+- `diff_open`
+- `diff_summary`
+- `diff_draws`
+- `diff_resources`
+- `diff_framebuffer`
+- `diff_close`
+
+### Diff Validation Result
+
+Two fresh captures from the same advanced sample were compared and were identical:
+
+- draw diff:
+  - `modified = 0`
+  - `added = 0`
+  - `deleted = 0`
+- resource diff:
+  - `modified = 0`
+  - `added = 0`
+  - `deleted = 0`
+- framebuffer diff:
+  - `diffPixels = 0`
+  - `diffRatio = 0.0`
+
+This confirms the advanced sample is stable enough to use as a diff-regression fixture.
+
+### Extended Findings
+
+#### Finding E1
+
+`debug_vertex` did not succeed on the tested OpenGL draws.
+
+Evidence:
+
+- advanced sample:
+  - event `19` -> `Cannot debug vertex 0 at event 19`
+- smoke sample cross-check:
+  - event `7` -> `Cannot debug vertex 0 at event 7`
+
+Impact:
+
+- Vertex shader single-invocation debugging is currently not available on the tested OpenGL captures.
+
+#### Finding E2
+
+`debug_pixel` did not succeed even for pixels that were confirmed by `pixel_history` to have been modified by the target draw.
+
+Evidence:
+
+- advanced sample confirmed-hit pixels:
+  - composite draw event `41`, pixel `(504,340)`
+    - `pixel_history` shows modification by event `41`
+    - `debug_pixel` -> `No debuggable fragment at (504,340) for event 41`
+  - overlay draw event `56`, pixel `(201,170)`
+    - `pixel_history` shows modification by event `56`
+    - `debug_pixel` -> `No debuggable fragment at (201,170) for event 56`
+- smoke sample confirmed-hit pixels:
+  - triangle draw event `7`, pixel `(160,400)`
+    - `pixel_history` shows modification by event `7`
+    - `debug_pixel` -> `No debuggable fragment at (160,400) for event 7`
+  - textured quad draw event `13`, pixel `(560,320)`
+    - `pixel_history` shows modification by event `13`
+    - `debug_pixel` -> `No debuggable fragment at (560,320) for event 13`
+
+Impact:
+
+- Fragment-level shader debugging appears unavailable on the tested OpenGL captures even when pixel ownership is confirmed.
+
+### Extended Conclusion
+
+Follow-up root-cause analysis indicates that Findings `E1` and `E2` are not `renderdoc-mcp` logic bugs.
+
+The more likely cause is a RenderDoc OpenGL shader-debugging limitation:
+
+- the tested shaders are reported as debuggable
+- `renderdoc-mcp` successfully reaches RenderDoc's debug entrypoints
+- RenderDoc still returns no usable debug trace for the tested OpenGL vertex and fragment cases
+
+This means the observed failures are best classified as RenderDoc replay / software-debugger limitations on the tested OpenGL path, not as incorrect MCP request routing or response parsing.
+
+## Debug Error Message Retest
+
+Retest date: 2026-04-13
+
+After the above analysis, `renderdoc-mcp` was rebuilt from source, reinstalled into Codex, and retested specifically to validate improved debug failure messages.
+
+### Installation Used For Retest
+
+- Installed binary:
+  - `C:\Users\Administrator\.codex\vendor_imports\renderdoc-mcp\bin\renderdoc-mcp.exe`
+- Installed binary timestamp:
+  - `2026-04-13 10:55:31`
+
+### Retest Goal
+
+Verify that OpenGL debug failures now distinguish between:
+
+1. shader not debuggable
+2. shader marked debuggable, but RenderDoc failing to produce a debug trace
+
+### Retest Result
+
+The updated binary now reports the tested OpenGL failures much more clearly.
+
+Verified behavior on both smoke and advanced samples:
+
+- `debug_vertex` now reports:
+  - the shader is marked as debuggable
+  - RenderDoc could not produce a debug trace
+  - this can happen with OpenGL features not fully supported by the software shader debugger
+- `debug_pixel` now reports the same underlying explanation instead of the older generic `No debuggable fragment` wording
+
+This confirms that the current user-facing diagnosis is now aligned with the observed root cause.
+
+### Example Messages Observed
+
+- smoke sample vertex debug:
+  - `Cannot debug vertex 0 at event 7. The shader is marked as debuggable, but RenderDoc could not produce a debug trace. This can happen with certain OpenGL shader features that are not fully supported by the software shader debugger.`
+- advanced sample pixel debug:
+  - `No fragment hit at (504,340) for event 41. The shader is marked as debuggable, but RenderDoc could not produce a debug trace. This can happen with certain OpenGL shader features that are not fully supported by the software shader debugger.`
+
+### Interpretation
+
+For the tested `#version 330 core` OpenGL captures, the effective conclusion is now:
+
+- this is not a `renderdoc-mcp` functional bug
+- the shader is not being rejected as legacy / non-debuggable
+- RenderDoc is instead failing at the later stage where it should provide an executable debug trace
+
+One wording detail remains: in the tested fragment cases, the message still starts with `No fragment hit` even when `pixel_history` confirms the draw touched that pixel. The added explanation after that prefix is correct, but the prefix itself could still be refined if stricter wording is desired.
+
+### Retest Artifact
+
+- Installed-binary debug message verification:
+  - `artifacts\debug-message-retest\debug_message_retest_20260413.json`
+
+### Extended Artifacts
+
+- Extended tool-run summary:
+  - `artifacts\extended\extended_mcp_checks.json`
+- Extended captures:
+  - `artifacts\extended\advanced_extended_a.rdc`
+  - `artifacts\extended\advanced_extended_b.rdc`
+- Extended diff image:
+  - `artifacts\extended\advanced_extended_diff.png`
+- Confirmed-hit pixel evidence for advanced sample:
+  - `artifacts\extended\advanced_debug_pixel_confirmation.json`
+- Confirmed-hit pixel evidence for smoke sample:
+  - `artifacts\extended\smoke-debug-check\smoke_debug_confirmed_hits.json`

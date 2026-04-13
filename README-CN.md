@@ -15,12 +15,14 @@
 - `CMakeLists.txt`
   - OpenGL 测试样例的构建配置
 - `renderdoc-mcp-test-report.md`
-  - 记录测试范围、发现结果和回归验证结论的测试报告
+  - 记录测试范围、问题发现、根因说明和重装回归结论的测试报告
 
 ## 仓库结构
 
 - `src/`
   - 用于生成可复现 capture 的测试样例源码
+- `scripts/`
+  - 可复用的 `renderdoc-mcp` stdio 回归测试脚本
 - `renderdoc-mcp-test-report.md`
   - 汇总执行记录和回归结果
 - `build/`
