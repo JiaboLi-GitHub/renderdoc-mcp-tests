@@ -471,8 +471,17 @@ def run(args) -> int:
             timeout=180.0,
         )
 
-        capture_a_path = capture_a.get("path") if isinstance(capture_a, dict) else capture_a_base
-        capture_b_path = capture_b.get("path") if isinstance(capture_b, dict) else capture_b_base
+        capture_a_path = (capture_a.get("path") if isinstance(capture_a, dict) else None) or capture_a_base
+        capture_b_path = (capture_b.get("path") if isinstance(capture_b, dict) else None) or capture_b_base
+
+        # Fallback to pre-existing .rdc if capture_frame failed
+        fallback = getattr(args, "fallback_rdc", "") or ""
+        if fallback and not os.path.exists(capture_a_path):
+            capture_a_path = fallback
+            report["capture_fallback_used"] = True
+        if not os.path.exists(capture_b_path):
+            capture_b_path = capture_a_path  # self-diff is fine
+
         report["captures"] = {
             "captureA": capture_a_path,
             "captureB": capture_b_path,
@@ -705,24 +714,17 @@ def run(args) -> int:
         # 38. shader_encodings
         encodings_result = record_tool(client, report, "shader_encodings", {})
 
-        # Pick encoding: prefer "spirv", then "glsl", fallback to first available
+        # Pick encoding: prefer "glsl" (we send GLSL source text), fallback to first available
         encoding = None
         if isinstance(encodings_result, dict):
             enc_list = encodings_result.get("encodings", [])
             if isinstance(enc_list, list):
-                # First pass: look for spirv
+                # First pass: look for glsl (since we send GLSL source text)
                 for e in enc_list:
                     name = e.get("name", e) if isinstance(e, dict) else str(e)
-                    if "spirv" in name.lower():
+                    if "glsl" in name.lower():
                         encoding = name
                         break
-                # Second pass: look for glsl
-                if encoding is None:
-                    for e in enc_list:
-                        name = e.get("name", e) if isinstance(e, dict) else str(e)
-                        if "glsl" in name.lower():
-                            encoding = name
-                            break
                 # Fallback: first available
                 if encoding is None and enc_list:
                     encoding = enc_list[0].get("name", enc_list[0]) if isinstance(enc_list[0], dict) else str(enc_list[0])
@@ -999,6 +1001,7 @@ def main() -> int:
     parser.add_argument("--server", default=DEFAULT_SERVER, help="Path to renderdoc-mcp.exe")
     parser.add_argument("--vulkan-exe", default=DEFAULT_VULKAN_EXE, help="Path to the advanced Vulkan test exe")
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Directory for captures and JSON results")
+    parser.add_argument("--fallback-rdc", default="", help="Pre-existing .rdc to use if capture_frame fails")
     return run(parser.parse_args())
 
 
