@@ -559,3 +559,150 @@ One wording detail remains: in the tested fragment cases, the message still star
   - `artifacts\extended\advanced_debug_pixel_confirmation.json`
 - Confirmed-hit pixel evidence for smoke sample:
   - `artifacts\extended\smoke-debug-check\smoke_debug_confirmed_hits.json`
+
+## macOS Platform Testing
+
+Test date: 2026-04-14
+Platform: macOS Sequoia, Apple M4, Apple Silicon
+
+### Environment
+
+- OS: macOS (arm64)
+- GPU: Apple M4
+- OpenGL: `4.1 Metal - 89.4` (Metal-backed OpenGL)
+- RenderDoc: v1.44, built from source
+- renderdoc-mcp: built from source with `RENDERDOC_DIR` pointing to RenderDoc source
+- Build tools: Homebrew CMake 4.3.1, Xcode Command Line Tools (AppleClang 17.0.0)
+
+### Build Steps Completed
+
+1. Installed Homebrew and CMake on macOS
+2. Cloned and built RenderDoc v1.44 from source (`librenderdoc.dylib`)
+3. Built renderdoc-mcp from source, linking against the RenderDoc library
+4. Installed Vulkan SDK (vulkan-loader, vulkan-headers, MoltenVK) for Vulkan replay testing
+5. Created macOS-native OpenGL smoke test (`renderdoc_mcp_opengl_smoke_macos.mm`)
+6. Updated CMakeLists.txt with cross-platform APPLE/WIN32 support
+7. Created macOS test runner script (`scripts/run_macos_checks.py`)
+
+### macOS OpenGL Smoke Test
+
+- Source: `src/renderdoc_mcp_opengl_smoke_macos.mm`
+- Framework: Cocoa + NSOpenGLView with OpenGL 4.1 Core Profile
+- Rendering: colored triangle + textured checkerboard quad (2 draw calls)
+- Frame count: 120 frames, auto-exit via NSTimer
+- RenderDoc integration: loads `librenderdoc.dylib` via `dlopen`, uses in-app API (`StartFrameCapture`/`EndFrameCapture`)
+- Build result: compiles and runs successfully on Apple M4
+
+Standalone run output:
+
+```
+GL_VERSION=4.1 Metal - 89.4
+GL_RENDERER=Apple M4
+Renderer path=modern-shader
+Completed 120 frames.
+```
+
+### renderdoc-mcp Unit Test Results
+
+Ran the project's built-in test suite (`ctest` in the renderdoc-mcp build directory).
+
+Fixes applied to enable macOS testing:
+
+1. Added POSIX implementation (`fork`/`pipe`/`poll`) to `ProcessRunner` in `test_protocol.cpp` and `WorkflowProcessRunner` in `test_workflow.cpp` (originally Windows-only with `#ifdef _WIN32`)
+2. Fixed C++ compilation errors in `test_tools*.cpp` — temporary `ToolContext` objects binding to non-const lvalue references, resolved via static `ctx()` helper methods
+
+Results:
+
+| Category | Count | Status |
+|----------|-------|--------|
+| Passed | 110 | All executed tests pass |
+| Failed | 0 | No failures |
+| Skipped | 71 | Platform limitations (see below) |
+| Total | 181 | |
+
+Breakdown of passed tests:
+
+- Unit tests (McpServer, ToolRegistry, Serialization, PassAnalysis): 69 passed
+- CLI parse tests: 24 passed
+- Diff algorithm tests: 11 passed
+- Protocol tests (newly enabled on macOS): 6 passed
+- Capture/Integration tests: skipped (require GPU replay)
+
+### macOS MCP Tool Checks
+
+Ran `scripts/run_macos_checks.py` against the locally built `renderdoc-mcp` server.
+
+Results: **7/7 checks passed**
+
+| Check | Result | Description |
+|-------|--------|-------------|
+| `initialize_ok` | PASS | MCP JSON-RPC handshake (protocol version `2025-03-26`) |
+| `tools_list_ok` | PASS | `tools/list` returns non-empty tool definitions |
+| `tools_list_has_59` | PASS | Exactly 59 tools registered |
+| `session_status_before_ok` | PASS | `session_status` reports `isOpen=false` before any capture |
+| `session_status_after_ok` | PASS | Session state consistent across queries |
+| `session_status_closed_ok` | PASS | Session reports closed after `close_capture` |
+| `error_handling_ok` | PASS | Unknown tool, invalid path, unknown method, missing params all return correct errors |
+
+Error handling verification details:
+
+- Unknown tool call (`nonexistent_tool_xyz`) returns tool-level error
+- Unknown JSON-RPC method (`nonexistent/method`) returns `-32601 Method not found`
+- Missing required params (`tools/call` with empty params) returns `-32602`
+- Invalid capture path returns descriptive file-not-found error
+
+### Frame Capture Investigation on macOS
+
+Two capture approaches were tested:
+
+1. **MCP `capture_frame` (RENDERDOC_ExecuteAndInject)**
+   - RenderDoc uses `DYLD_INSERT_LIBRARIES` + dyld interposing on macOS
+   - Process injection succeeded (target process launched and ran)
+   - Result: `Target process disconnected during wait`
+   - No `.rdc` file generated
+
+2. **In-app API (`StartFrameCapture`/`EndFrameCapture`)**
+   - Loaded `librenderdoc.dylib` via `dlopen` before GL context creation
+   - Also tested with `DYLD_INSERT_LIBRARIES` preloading
+   - `RENDERDOC_GetAPI` succeeded, API version `1.7.0` returned
+   - `StartFrameCapture` called with valid `CGLContextObj`
+   - `EndFrameCapture` returned `0` (failure)
+   - `DYLD_PRINT_LIBRARIES` confirmed `librenderdoc.dylib` was loaded
+   - `GL_RENDERER` still reported `Apple M4` (not wrapped by RenderDoc)
+
+Root cause analysis:
+
+- RenderDoc's `librenderdoc.dylib` contains an `__interpose` section with CGL function replacements
+- The interposed functions (e.g., `interposed_CGLFlushDrawable`) are local symbols (lowercase `t` in `nm` output)
+- macOS Apple Silicon reports `GL_VERSION=4.1 Metal`, meaning OpenGL is implemented as a Metal translation layer
+- RenderDoc's CGL-level interposing cannot intercept Metal-backed OpenGL because the actual rendering goes through Metal, not through the CGL API path that RenderDoc hooks
+- This is a fundamental platform limitation, not a renderdoc-mcp or RenderDoc configuration issue
+
+### Vulkan Replay Investigation on macOS
+
+Attempted to open the bundled `tests/fixtures/vkcube.rdc` Vulkan capture:
+
+1. Without Vulkan SDK: `Failed to load vulkan library`
+2. With Vulkan SDK (vulkan-loader + MoltenVK): `VK_ERROR_INCOMPATIBLE_DRIVER`
+3. With correct MoltenVK ICD path: Same `VK_ERROR_INCOMPATIBLE_DRIVER`
+
+Despite MoltenVK supporting `VK_KHR_get_physical_device_properties2` (confirmed via `vulkaninfo`), RenderDoc's internal Vulkan replay loader cannot work through MoltenVK on macOS.
+
+### macOS Platform Limitations Summary
+
+| Feature | Status | Root Cause |
+|---------|--------|------------|
+| renderdoc-mcp build | Works | Compiles with CMake + AppleClang |
+| MCP protocol (initialize, tools/list) | Works | Pure JSON-RPC, no GPU dependency |
+| Session management (session_status) | Works | No GPU dependency |
+| Error handling | Works | No GPU dependency |
+| OpenGL smoke test app | Works | Cocoa + NSOpenGLView, 120 frames |
+| OpenGL frame capture | Not available | Metal-backed GL breaks CGL interposing |
+| Vulkan frame replay | Not available | VK_ERROR_INCOMPATIBLE_DRIVER via MoltenVK |
+| Capture-dependent tools (57 tools) | Not testable | Requires valid .rdc file |
+
+### macOS Test Artifacts
+
+- macOS test report: `artifacts/macos/macos_checks.json`
+- macOS smoke test binary: `build/bin/renderdoc_mcp_opengl_smoke`
+- macOS test script: `scripts/run_macos_checks.py`
